@@ -13,7 +13,8 @@ const {
   getMe
 } = require('../controllers/authController');
 
-// Validation rules
+// Validation rulesss
+// bb
 const registerValidation = [
   body('name')
     .trim()
