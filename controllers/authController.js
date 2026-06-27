@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const User = require('../models/User');
+const User = require('../models/user');
 const generateToken = require('../utils/generateToken');
 const { sendEmail, getWelcomeEmailTemplate, getVerificationEmailTemplate, getResetPasswordEmailTemplate } = require('../utils/sendEmail');
 // @desc    Register user
