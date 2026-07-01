@@ -1,92 +1,143 @@
 const express = require('express');
 const cors = require('cors');
-const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const dotenv = require('dotenv');
 const connectDB = require('./config/db');
+const adminAuthRoutes = require('./routes/adminAuth');
 
-// Load environment variables
 dotenv.config();
-
-// Connect to database
 connectDB();
 
 const app = express();
 
-// Security middleware
-app.use(helmet());
+// Trust the first proxy hop
+app.set('trust proxy', 1);
 
-// CORS configuration
-app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:5173'], // Add your frontend URLs
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  credentials: true
-}));
-
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later'
+// Manual security headers (replaces helmet)
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('X-DNS-Prefetch-Control', 'off');
+  res.setHeader('X-Download-Options', 'noopen');
+  res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+  res.removeHeader('X-Powered-By');
+  next();
 });
 
-// Apply rate limiting to auth routes
-app.use('/api/auth', limiter);
+// CORS
+const allowedOrigins = (process.env.FRONTEND_URLS || 'http://localhost:3000,http://localhost:5173').split(',');
+app.use(
+  cors({
+    origin: allowedOrigins,
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    credentials: true,
+  })
+);
 
-// Body parser
+// Body parsing
 app.use(express.json({ limit: '10kb' }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 
-// Routes
+// Manual NoSQL injection prevention (replaces express-mongo-sanitize)
+app.use((req, res, next) => {
+  if (req.body) {
+    const sanitize = (obj) => {
+      if (typeof obj !== 'object' || obj === null) return;
+      
+      for (const key in obj) {
+        if (key.startsWith('$') || key.includes('.')) {
+          delete obj[key];
+        } else if (typeof obj[key] === 'object' && obj[key] !== null) {
+          sanitize(obj[key]);
+        }
+      }
+    };
+    
+    sanitize(req.body);
+  }
+  next();
+});
+
+// General rate limit across the API
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many requests, please try again later' },
+});
+app.use('/api', generalLimiter);
+
+// Tighter limit on auth endpoints
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many attempts, please try again later' },
+});
+app.use(['/api/auth/login', '/api/auth/register', '/api/auth/forgot-password', '/api/auth/resend-verification'], authLimiter);
+
+// ============================================
+// ROUTES - ORDER MATTERS!
+// ============================================
+
+// 1. Admin Auth Routes (MUST come before /api/admin)
+app.use('/api/admin/auth', adminAuthRoutes);
+
+// 2. Other routes
 app.use('/api/auth', require('./routes/authRoutes'));
+app.use('/api/member', require('./routes/memberRoutes'));
 
-// Health check endpoint
+// 3. Admin Routes (protected - comes after auth routes)
+app.use('/api/admin', require('./routes/adminRoutes'));
+
+// Health check
 app.get('/api/health', (req, res) => {
   res.status(200).json({
     success: true,
     message: 'Server is running',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
   });
 });
 
-// 404 handler
+// 404 - MUST be after all routes
 app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'Route not found'
-  });
+  res.status(404).json({ success: false, message: 'Route not found' });
 });
 
 // Global error handler
 app.use((err, req, res, next) => {
   console.error('Error:', err.message);
-  
-  // Mongoose duplicate key error
+
   if (err.code === 11000) {
-    const field = Object.keys(err.keyValue)[0];
-    return res.status(409).json({
-      success: false,
-      message: `An account with this ${field} already exists`
-    });
+    const field = Object.keys(err.keyValue || {})[0] || 'field';
+    return res.status(409).json({ success: false, message: `An account with this ${field} already exists` });
   }
 
-  // Mongoose validation error
   if (err.name === 'ValidationError') {
-    const messages = Object.values(err.errors).map(e => e.message);
-    return res.status(400).json({
-      success: false,
-      message: messages[0]
-    });
+    const messages = Object.values(err.errors).map((e) => e.message);
+    return res.status(400).json({ success: false, message: messages[0] });
   }
 
   res.status(err.statusCode || 500).json({
     success: false,
-    message: err.message || 'Internal server error'
+    message: err.message || 'Internal server error',
   });
 });
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-  console.log(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
+const server = app.listen(PORT, () => {
+  console.log(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
+  console.log(`Admin auth routes available at: http://localhost:${PORT}/api/admin/auth`);
 });
+
+process.on('unhandledRejection', (err) => {
+  console.error('Unhandled rejection:', err.message);
+  server.close(() => process.exit(1));
+});
+
+module.exports = app;

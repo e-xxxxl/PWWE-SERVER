@@ -1,0 +1,16 @@
+{
+  "admins": [
+    {
+      "email": "admin@pwwe.com",
+      "password": "admin123",
+      "name": "Super Admin",
+      "role": "super-admin"
+    },
+    {
+      "email": "manager@pwwe.com", 
+      "password": "manager123",
+      "name": "Manager",
+      "role": "admin"
+    }
+  ]
+}
