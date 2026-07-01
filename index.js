@@ -27,7 +27,7 @@ app.use((req, res, next) => {
 });
 
 // CORS
-const allowedOrigins = (process.env.FRONTEND_URLS || 'http://localhost:3000,http://localhost:5173').split(',');
+const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:3000,http://localhost:5173').split(',');
 app.use(
   cors({
     origin: allowedOrigins,
