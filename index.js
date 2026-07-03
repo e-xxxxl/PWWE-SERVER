@@ -94,6 +94,9 @@ app.use('/api/member', require('./routes/memberRoutes'));
 // 3. Admin Routes (protected - comes after auth routes)
 app.use('/api/admin', require('./routes/adminRoutes'));
 
+// Add this with other route imports
+app.use('/api/payments', require('./routes/paymentRoutes'));
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.status(200).json({

@@ -26,17 +26,27 @@ const transactionSchema = new mongoose.Schema(
     },
     method: {
       type: String,
-      enum: ['bank_transfer', 'cash', 'card', 'other'],
+      enum: ['bank_transfer', 'cash', 'card', 'other', 'paystack'], // added paystack
       default: 'bank_transfer',
     },
     status: {
       type: String,
-      enum: ['pending', 'cleared', 'rejected'],
+      enum: ['pending', 'cleared', 'rejected', 'failed'], // added failed (paymentController uses it)
       default: 'pending',
     },
+    // --- added for Paystack ---
+    reference: {
+      type: String,
+      unique: true,
+      sparse: true, // only Paystack txns have this; manual ones won't
+    },
+    paymentData: {
+      type: mongoose.Schema.Types.Mixed,
+      default: undefined,
+    },
+    // ---------------------------
     note: { type: String, trim: true, maxlength: 280 },
     recordedBy: {
-      // Admin/treasurer who logged it, if not self-reported by the member
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
     },
@@ -49,7 +59,6 @@ const transactionSchema = new mongoose.Schema(
 
 transactionSchema.index({ user: 1, category: 1, createdAt: -1 });
 transactionSchema.index({ status: 1 });
+// reference already indexed via unique: true
 
-// Replace: module.exports = mongoose.model('Transaction', transactionSchema);
-// With:
 module.exports = mongoose.models.Transaction || mongoose.model('Transaction', transactionSchema);

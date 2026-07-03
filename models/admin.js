@@ -47,7 +47,7 @@ adminSchema.pre('save', function(next) {
   admin.updatedAt = new Date();
   
   // Only hash the password if it has been modified (or is new)
-  if (!admin.isModified('password')) return next();
+  if (!admin.isModified('password')) return 
   
   // Generate a salt
   bcrypt.genSalt(10, function(err, salt) {
@@ -59,7 +59,7 @@ adminSchema.pre('save', function(next) {
       
       // Override the cleartext password with the hashed one
       admin.password = hash;
-      next();
+      // next();
     });
   });
 });
