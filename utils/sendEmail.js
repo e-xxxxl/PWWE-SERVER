@@ -5,7 +5,7 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 
 const sendEmail = async ({ to, subject, html }) => {
   try {
-    console.log('📧 Attempting to send email...');
+    console.log('Attempting to send email...');
     console.log('   From:', process.env.FROM_EMAIL);
     console.log('   To:', to);
     console.log('   Subject:', subject);
@@ -19,358 +19,203 @@ const sendEmail = async ({ to, subject, html }) => {
 
     // Check for Resend API errors
     if (error) {
-      console.error('❌ Resend API Error:', error);
-      return { 
-        success: false, 
-        error: error.message || 'Failed to send email' 
+      console.error('Resend API Error:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to send email'
       };
     }
 
     // Success - data.id contains the email ID
     if (data?.id) {
-      console.log('✅ Email sent successfully!');
-      console.log('   Message ID:', data.id);
+      console.log('Email sent successfully. Message ID:', data.id);
       return { success: true, data };
     }
 
     // Unknown response
-    console.log('⚠️ Unexpected Resend response:', data);
+    console.log('Unexpected Resend response:', data);
     return { success: false, error: 'Unknown response from Resend' };
 
   } catch (error) {
-    console.error('❌ Email exception:', error.message);
-    
+    console.error('Email exception:', error.message);
+
     // Handle specific Resend errors
     if (error.statusCode === 403) {
-      console.error('   → Sandbox mode: You can only send to verified emails');
-      console.error('   → Add this email to your Resend dashboard or verify your domain');
+      console.error('   -> Sandbox mode: You can only send to verified emails');
+      console.error('   -> Add this email to your Resend dashboard or verify your domain');
     }
-    
+
     return { success: false, error: error.message };
   }
 };
 
-// Welcome Email Template
+// -----------------------------------------------------------------------
+// Shared layout pieces
+// -----------------------------------------------------------------------
+
+const BRAND_COLOR = '#96158F';
+const INK = '#1A1A1A';
+const MUTED = '#6B6B6B';
+const BORDER = '#E7E5E4';
+const BG = '#F5F3F2';
+
+// Set LOGO_URL in your .env, e.g. LOGO_URL=https://yourdomain.com/logo.png
+const LOGO_URL = process.env.LOGO_URL || "https://res.cloudinary.com/dhkzg2gfk/image/upload/v1783336483/logo-removebg-preview_hopk7z.png";
+
+const emailHeader = () => `
+  <tr>
+    <td style="padding: 32px 40px 24px 40px; border-bottom: 1px solid ${BORDER};">
+      <img src="${LOGO_URL}" alt="PWWE Foundation" height="36" style="height: 36px; display: block;" />
+    </td>
+  </tr>
+`;
+
+const emailFooter = () => `
+  <tr>
+    <td style="padding: 28px 40px; border-top: 1px solid ${BORDER}; background: ${BG};">
+      <p style="margin: 0 0 6px 0; font-size: 12px; color: ${MUTED}; line-height: 1.6;">
+        The Power Within Women Empowerment Foundation
+      </p>
+      <p style="margin: 0 0 6px 0; font-size: 12px; color: ${MUTED}; line-height: 1.6;">
+        This message was sent to you because you have an account with PWWE Foundation.
+      </p>
+      <p style="margin: 0; font-size: 12px; color: ${MUTED};">
+        &copy; ${new Date().getFullYear()} PWWE Foundation. All rights reserved.
+      </p>
+    </td>
+  </tr>
+`;
+
+const emailShell = (bodyContent) => `
+  <!DOCTYPE html>
+  <html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  </head>
+  <body style="margin: 0; padding: 0; background: ${BG}; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background: ${BG}; padding: 32px 16px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="background: #FFFFFF; border-radius: 6px; overflow: hidden; border: 1px solid ${BORDER};">
+            ${emailHeader()}
+            <tr>
+              <td style="padding: 36px 40px;">
+                ${bodyContent}
+              </td>
+            </tr>
+            ${emailFooter()}
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+  </html>
+`;
+
+const button = (url, label) => `
+  <a href="${url}" style="display: inline-block; padding: 13px 28px; background: ${BRAND_COLOR}; color: #FFFFFF; text-decoration: none; border-radius: 4px; font-weight: 600; font-size: 14px;">
+    ${label}
+  </a>
+`;
+
+// -----------------------------------------------------------------------
+// Welcome Email
+// -----------------------------------------------------------------------
+
 const getWelcomeEmailTemplate = (name, coopId) => {
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <style>
-        body { 
-          font-family: 'Segoe UI', Arial, sans-serif; 
-          line-height: 1.8; 
-          color: #333; 
-          margin: 0;
-          padding: 0;
-          background-color: #f4f4f4;
-        }
-        .container { 
-          max-width: 600px; 
-          margin: 0 auto; 
-          background: white;
-        }
-        .header { 
-          background: linear-gradient(135deg, #96158F, #6B21A8); 
-          color: white; 
-          padding: 40px 30px; 
-          text-align: center; 
-        }
-        .header h1 {
-          margin: 0;
-          font-size: 28px;
-          font-weight: 700;
-        }
-        .header .subtitle {
-          font-size: 14px;
-          opacity: 0.9;
-          margin-top: 10px;
-        }
-        .content { 
-          padding: 40px 30px; 
-          background: white; 
-        }
-        .welcome-box {
-          background: #fdf2f8;
-          border-left: 4px solid #96158F;
-          padding: 20px;
-          margin: 20px 0;
-          border-radius: 4px;
-        }
-        .coop-id-box {
-          background: #1a1a1a;
-          color: #CC9838;
-          padding: 20px;
-          text-align: center;
-          border-radius: 8px;
-          margin: 30px 0;
-          font-family: 'Courier New', monospace;
-        }
-        .coop-id-box .label {
-          font-size: 12px;
-          text-transform: uppercase;
-          letter-spacing: 2px;
-          color: #999;
-          margin-bottom: 8px;
-        }
-        .coop-id-box .id {
-          font-size: 24px;
-          font-weight: bold;
-          letter-spacing: 3px;
-        }
-        .benefits {
-          margin: 30px 0;
-        }
-        .benefit-item {
-          display: flex;
-          align-items: flex-start;
-          gap: 12px;
-          margin-bottom: 20px;
-        }
-        .benefit-icon {
-          background: #96158F;
-          color: white;
-          width: 40px;
-          height: 40px;
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 18px;
-          flex-shrink: 0;
-        }
-        .benefit-text h4 {
-          margin: 0 0 4px 0;
-          color: #96158F;
-          font-size: 16px;
-        }
-        .benefit-text p {
-          margin: 0;
-          font-size: 14px;
-          color: #666;
-        }
-        .button { 
-          display: inline-block; 
-          padding: 16px 40px; 
-          background: #96158F; 
-          color: white; 
-          text-decoration: none; 
-          border-radius: 8px; 
-          font-weight: 600;
-          font-size: 16px;
-          margin: 10px 0; 
-          text-align: center;
-        }
-        .divider {
-          border-top: 1px solid #e5e5e5;
-          margin: 30px 0;
-        }
-        .footer { 
-          text-align: center; 
-          padding: 30px; 
-          color: #999; 
-          font-size: 13px;
-          background: #f9f9f9;
-          line-height: 2;
-        }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <div class="header">
-          <h1>🎉 Welcome to PWWE!</h1>
-          <div class="subtitle">The Power Within Women Empowerment Foundation</div>
-        </div>
-        
-        <div class="content">
-          <h2>Dear ${name},</h2>
-          
-          <p>We are thrilled to welcome you to <strong>The Power Within Women Empowerment Foundation</strong> – a community of strong, ambitious women transforming their lives and communities through financial empowerment, skills development, and mutual support.</p>
-          
-          <div class="welcome-box">
-            <p style="margin: 0;">✨ <strong>Your journey to financial independence and personal growth starts here!</strong></p>
-          </div>
-          
-          ${coopId ? `
-          <div class="coop-id-box">
-            <div class="label">Your Cooperative ID</div>
-            <div class="id">${coopId}</div>
-            <p style="margin-top: 10px; font-size: 12px; color: #999;">Keep this ID safe – you'll need it for cooperative activities</p>
-          </div>
-          ` : ''}
-          
-          <h3>🌟 What You Get as a PWWE Member:</h3>
-          
-          <div class="benefits">
-            <div class="benefit-item">
-              <div class="benefit-icon">💰</div>
-              <div class="benefit-text">
-                <h4>Cooperative Savings</h4>
-                <p>Join savings groups with rotating payouts to help you achieve your financial goals faster</p>
-              </div>
-            </div>
-            
-            <div class="benefit-item">
-              <div class="benefit-icon">🎓</div>
-              <div class="benefit-text">
-                <h4>Skills Training</h4>
-                <p>Access vocational training and workshops to develop marketable skills</p>
-              </div>
-            </div>
-            
-            <div class="benefit-item">
-              <div class="benefit-icon">🤝</div>
-              <div class="benefit-text">
-                <h4>Business Mentorship</h4>
-                <p>Get guidance from experienced entrepreneurs to start or grow your business</p>
-              </div>
-            </div>
-            
-            <div class="benefit-item">
-              <div class="benefit-icon">👥</div>
-              <div class="benefit-text">
-                <h4>Supportive Community</h4>
-                <p>Connect with like-minded women who support and uplift each other</p>
-              </div>
-            </div>
-          </div>
-          
-          <div class="divider"></div>
-          
-          <center>
-            <p style="font-size: 16px; font-weight: 600; margin-bottom: 20px;">Ready to get started?</p>
-            <a href="${process.env.FRONTEND_URL}/dashboard" class="button">Go to Your Dashboard</a>
-          </center>
-          
-          <div class="divider"></div>
-          
-          <p style="font-size: 14px; color: #666;">
-            <strong>Next Steps:</strong><br>
-            1️⃣ Complete your profile<br>
-            2️⃣ Explore available cooperative groups<br>
-            3️⃣ Sign up for upcoming training programs<br>
-            4️⃣ Connect with other members
-          </p>
-        </div>
-        
-        <div class="footer">
-          <p><strong>The Power Within Women Empowerment Foundation</strong></p>
-          <p>Empowering women, transforming communities</p>
-          <p>© ${new Date().getFullYear()} PWWE Foundation. All rights reserved.</p>
-        </div>
-      </div>
-    </body>
-    </html>
+  const body = `
+    <p style="margin: 0 0 4px 0; font-size: 13px; color: ${MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Welcome</p>
+    <h1 style="margin: 0 0 20px 0; font-size: 22px; color: ${INK}; font-weight: 600;">Hi ${name}, your account is ready</h1>
+
+    <p style="margin: 0 0 16px 0; font-size: 15px; line-height: 1.7; color: ${INK};">
+      Thank you for joining The Power Within Women Empowerment Foundation. Your membership gives you access to cooperative savings, business mentorship, and skills training designed to support your financial growth.
+    </p>
+
+    ${coopId ? `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background: ${BG}; border-radius: 4px; margin: 24px 0;">
+      <tr>
+        <td style="padding: 16px 20px;">
+          <p style="margin: 0 0 4px 0; font-size: 11px; color: ${MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Your Cooperative ID</p>
+          <p style="margin: 0; font-size: 18px; color: ${INK}; font-weight: 600; letter-spacing: 1px; font-family: 'Courier New', monospace;">${coopId}</p>
+        </td>
+      </tr>
+    </table>
+    ` : ''}
+
+    <p style="margin: 0 0 8px 0; font-size: 15px; font-weight: 600; color: ${INK};">Getting started</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin: 0 0 28px 0;">
+      <tr><td style="padding: 3px 0; font-size: 14px; color: ${INK}; line-height: 1.6;">1. Complete your member profile</td></tr>
+      <tr><td style="padding: 3px 0; font-size: 14px; color: ${INK}; line-height: 1.6;">2. Browse available cooperative groups</td></tr>
+      <tr><td style="padding: 3px 0; font-size: 14px; color: ${INK}; line-height: 1.6;">3. Register for upcoming training sessions</td></tr>
+    </table>
+
+    ${button(`${process.env.FRONTEND_URL}/dashboard`, 'Go to Dashboard')}
+
+    <p style="margin: 28px 0 0 0; font-size: 13px; color: ${MUTED}; line-height: 1.6;">
+      If you have any questions, simply reply to this email — our team is happy to help.
+    </p>
   `;
+  return emailShell(body);
 };
 
-// Email Verification Template
+// -----------------------------------------------------------------------
+// Email Verification
+// -----------------------------------------------------------------------
+
 const getVerificationEmailTemplate = (name, verificationUrl) => {
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-        .header { background: #6B21A8; color: white; padding: 30px; text-align: center; }
-        .content { padding: 30px; background: #f9f9f9; }
-        .button { 
-          display: inline-block; 
-          padding: 12px 30px; 
-          background: #6B21A8; 
-          color: white; 
-          text-decoration: none; 
-          border-radius: 5px; 
-          margin: 20px 0; 
-        }
-        .footer { text-align: center; padding: 20px; color: #666; font-size: 14px; }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <div class="header">
-          <h1>Verify Your Email</h1>
-        </div>
-        <div class="content">
-          <h2>Hello ${name},</h2>
-          <p>Thank you for joining The Power Within Women Empowerment Foundation. Please verify your email address to get started:</p>
-          <center>
-            <a href="${verificationUrl}" class="button">Verify Email Address</a>
-          </center>
-          <p>Or copy and paste this link in your browser:</p>
-          <p style="word-break: break-all;">${verificationUrl}</p>
-          <p>This link will expire in 24 hours.</p>
-          <p>If you didn't create this account, please ignore this email.</p>
-        </div>
-        <div class="footer">
-          <p>© ${new Date().getFullYear()} PWWE Foundation. All rights reserved.</p>
-        </div>
-      </div>
-    </body>
-    </html>
+  const body = `
+    <p style="margin: 0 0 4px 0; font-size: 13px; color: ${MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Verify your email</p>
+    <h1 style="margin: 0 0 20px 0; font-size: 22px; color: ${INK}; font-weight: 600;">Confirm your email address</h1>
+
+    <p style="margin: 0 0 24px 0; font-size: 15px; line-height: 1.7; color: ${INK};">
+      Hi ${name}, thanks for signing up with PWWE Foundation. Please confirm your email address to activate your account.
+    </p>
+
+    ${button(verificationUrl, 'Verify Email Address')}
+
+    <p style="margin: 24px 0 4px 0; font-size: 13px; color: ${MUTED};">Or copy and paste this link into your browser:</p>
+    <p style="margin: 0 0 24px 0; font-size: 13px; color: ${BRAND_COLOR}; word-break: break-all;">${verificationUrl}</p>
+
+    <p style="margin: 0; font-size: 13px; color: ${MUTED}; line-height: 1.6;">
+      This link expires in 24 hours. If you didn't create this account, you can safely ignore this email.
+    </p>
   `;
+  return emailShell(body);
 };
 
-// Password Reset Template
+// -----------------------------------------------------------------------
+// Password Reset
+// -----------------------------------------------------------------------
+
 const getResetPasswordEmailTemplate = (name, resetUrl) => {
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-        .header { background: #CC9838; color: white; padding: 30px; text-align: center; }
-        .content { padding: 30px; background: #f9f9f9; }
-        .button { 
-          display: inline-block; 
-          padding: 12px 30px; 
-          background: #CC9838; 
-          color: white; 
-          text-decoration: none; 
-          border-radius: 5px; 
-          margin: 20px 0; 
-        }
-        .warning { 
-          background: #fff3cd; 
-          border: 1px solid #ffc107; 
-          padding: 15px; 
-          border-radius: 5px; 
-          margin: 20px 0; 
-        }
-        .footer { text-align: center; padding: 20px; color: #666; font-size: 14px; }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <div class="header">
-          <h1>Password Reset Request</h1>
-        </div>
-        <div class="content">
-          <h2>Hello ${name},</h2>
-          <p>We received a request to reset your password. Click the button below to create a new password:</p>
-          <center>
-            <a href="${resetUrl}" class="button">Reset Password</a>
-          </center>
-          <p>Or copy and paste this link in your browser:</p>
-          <p style="word-break: break-all;">${resetUrl}</p>
-          <div class="warning">
-            <strong>⚠️ Security Notice:</strong> This link will expire in 1 hour. If you didn't request this change, please ignore this email or contact support.
-          </div>
-        </div>
-        <div class="footer">
-          <p>© ${new Date().getFullYear()} PWWE Foundation. All rights reserved.</p>
-        </div>
-      </div>
-    </body>
-    </html>
+  const body = `
+    <p style="margin: 0 0 4px 0; font-size: 13px; color: ${MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Password reset</p>
+    <h1 style="margin: 0 0 20px 0; font-size: 22px; color: ${INK}; font-weight: 600;">Reset your password</h1>
+
+    <p style="margin: 0 0 24px 0; font-size: 15px; line-height: 1.7; color: ${INK};">
+      Hi ${name}, we received a request to reset the password on your account. Click below to choose a new one.
+    </p>
+
+    ${button(resetUrl, 'Reset Password')}
+
+    <p style="margin: 24px 0 4px 0; font-size: 13px; color: ${MUTED};">Or copy and paste this link into your browser:</p>
+    <p style="margin: 0 0 24px 0; font-size: 13px; color: ${BRAND_COLOR}; word-break: break-all;">${resetUrl}</p>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background: ${BG}; border-radius: 4px;">
+      <tr>
+        <td style="padding: 14px 18px; font-size: 13px; color: ${INK}; line-height: 1.6;">
+          <strong>Security note:</strong> This link expires in 1 hour. If you didn't request a password reset, please ignore this email or contact support.
+        </td>
+      </tr>
+    </table>
   `;
+  return emailShell(body);
 };
 
-module.exports = { 
-  sendEmail, 
+module.exports = {
+  sendEmail,
   getWelcomeEmailTemplate,
-  getVerificationEmailTemplate, 
-  getResetPasswordEmailTemplate 
+  getVerificationEmailTemplate,
+  getResetPasswordEmailTemplate
 };
