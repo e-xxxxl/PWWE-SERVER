@@ -85,6 +85,26 @@ userSchema.index({ approvalStatus: 1 });
 // Single pre-save hook: hash password + assign a coopId when missing.
 // NOTE: every branch MUST call next() — a pre-save hook that never calls
 // next() will hang the save() call forever. That was the bug here before.
+// userSchema.pre('save', async function (next) {
+//   try {
+//     if (this.isModified('password')) {
+//       const salt = await bcrypt.genSalt(12);
+//       this.password = await bcrypt.hash(this.password, salt);
+//       if (!this.isNew) this.passwordChangedAt = Date.now() - 1000;
+//     }
+
+//     if (!this.coopId) {
+//       const timestamp = Date.now().toString(36).toUpperCase();
+//       const randomStr = crypto.randomBytes(3).toString('hex').toUpperCase();
+//       this.coopId = `PWWE-${timestamp}-${randomStr}`;
+//     }
+
+//     // next();
+//   } catch (error) {
+//     next(error);
+//   }
+// });
+
 userSchema.pre('save', async function (next) {
   try {
     if (this.isModified('password')) {
@@ -94,12 +114,18 @@ userSchema.pre('save', async function (next) {
     }
 
     if (!this.coopId) {
-      const timestamp = Date.now().toString(36).toUpperCase();
-      const randomStr = crypto.randomBytes(3).toString('hex').toUpperCase();
-      this.coopId = `PWWE-${timestamp}-${randomStr}`;
+      const now = new Date();
+      const year = now.getFullYear().toString(); // 2026
+      const month = (now.getMonth() + 1).toString().padStart(2, '0'); // 07
+      
+      // Generate 5-digit random number
+      const randomNum = Math.floor(10000 + Math.random() * 90000).toString(); // 10000-99999
+      
+      this.coopId = `PWWEF${year}${month}${randomNum}`;
+      // Example output: PWWEF20260712345
     }
 
-    // next();
+   
   } catch (error) {
     next(error);
   }
