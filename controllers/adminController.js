@@ -585,6 +585,134 @@ const getReportsSummary = async (req, res) => {
   }
 };
 
+// @desc    Export savings report as Excel
+// @route   GET /api/admin/reports/savings/export
+// @access  Private/Admin
+const exportSavingsReport = async (req, res) => {
+  try {
+    const transactions = await Transaction.find({
+      category: 'savings',
+      status: 'cleared'
+    })
+    .populate('user', 'name email coopId')
+    .sort({ createdAt: -1 });
+
+    // Format data for Excel
+    const reportData = transactions.map(tx => ({
+      Date: new Date(tx.createdAt).toLocaleDateString('en-NG'),
+      'Member Name': tx.user?.name || 'N/A',
+      'Coop ID': tx.user?.coopId || 'N/A',
+      'Email': tx.user?.email || 'N/A',
+      Type: tx.type.charAt(0).toUpperCase() + tx.type.slice(1),
+      Amount: tx.amount,
+      Method: tx.method?.replace('_', ' '),
+      Status: tx.status,
+      Note: tx.note || '',
+      'Recorded By': tx.recordedBy || 'System'
+    }));
+
+    // Create workbook
+    const XLSX = require('xlsx');
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(reportData);
+
+    // Add summary
+    const totalDeposits = transactions
+      .filter(tx => tx.type === 'deposit')
+      .reduce((sum, tx) => sum + tx.amount, 0);
+    const totalWithdrawals = transactions
+      .filter(tx => tx.type === 'withdrawal')
+      .reduce((sum, tx) => sum + tx.amount, 0);
+
+    const summaryData = [
+      { 'Summary': 'Total Deposits', 'Amount': totalDeposits },
+      { 'Summary': 'Total Withdrawals', 'Amount': totalWithdrawals },
+      { 'Summary': 'Net Balance', 'Amount': totalDeposits - totalWithdrawals }
+    ];
+
+    // Add summary at the end
+    const summaryWs = XLSX.utils.json_to_sheet(summaryData);
+    
+    XLSX.utils.sheet_add_aoa(ws, [['']], { origin: -1 });
+    XLSX.utils.sheet_add_aoa(ws, [['SUMMARY']], { origin: -1 });
+    XLSX.utils.sheet_add_json(ws, summaryData, { origin: -1 });
+
+    XLSX.utils.book_append_sheet(wb, ws, 'Savings Report');
+
+    // Generate buffer
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    // Set headers
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=savings-report-${new Date().toISOString().split('T')[0]}.xlsx`);
+    
+    res.send(buffer);
+  } catch (error) {
+    console.error('Export savings report error:', error);
+    res.status(500).json({ success: false, message: 'Server error exporting report' });
+  }
+};
+
+// @desc    Export contribution report as Excel
+// @route   GET /api/admin/reports/contributions/export
+// @access  Private/Admin
+const exportContributionReport = async (req, res) => {
+  try {
+    const transactions = await Transaction.find({
+      category: 'contribution',
+      status: 'cleared'
+    })
+    .populate('user', 'name email coopId')
+    .sort({ createdAt: -1 });
+
+    // Format data for Excel
+    const reportData = transactions.map(tx => ({
+      Date: new Date(tx.createdAt).toLocaleDateString('en-NG'),
+      'Member Name': tx.user?.name || 'N/A',
+      'Coop ID': tx.user?.coopId || 'N/A',
+      'Email': tx.user?.email || 'N/A',
+      Amount: tx.amount,
+      Method: tx.method?.replace('_', ' '),
+      Status: tx.status,
+      Note: tx.note || '',
+      'Recorded By': tx.recordedBy || 'System'
+    }));
+
+    // Create workbook
+    const XLSX = require('xlsx');
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(reportData);
+
+    // Add summary
+    const totalCollected = transactions.reduce((sum, tx) => sum + tx.amount, 0);
+    const totalContributors = new Set(transactions.map(tx => tx.user?._id?.toString())).size;
+
+    const summaryData = [
+      { 'Summary': 'Total Collected', 'Amount': totalCollected },
+      { 'Summary': 'Total Contributors', 'Amount': totalContributors },
+      { 'Summary': 'Total Transactions', 'Amount': transactions.length }
+    ];
+
+    XLSX.utils.sheet_add_aoa(ws, [['']], { origin: -1 });
+    XLSX.utils.sheet_add_aoa(ws, [['SUMMARY']], { origin: -1 });
+    XLSX.utils.sheet_add_json(ws, summaryData, { origin: -1 });
+
+    XLSX.utils.book_append_sheet(wb, ws, 'Contributions Report');
+
+    // Generate buffer
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    // Set headers
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=contribution-report-${new Date().toISOString().split('T')[0]}.xlsx`);
+    
+    res.send(buffer);
+  } catch (error) {
+    console.error('Export contribution report error:', error);
+    res.status(500).json({ success: false, message: 'Server error exporting report' });
+  }
+};
+
 module.exports = {
   listUsers,
   getUser,
@@ -603,4 +731,6 @@ module.exports = {
   approveLoan,
   rejectLoan,
   getReportsSummary,
+    exportSavingsReport,
+  exportContributionReport,
 };

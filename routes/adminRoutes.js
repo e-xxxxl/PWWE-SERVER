@@ -19,6 +19,8 @@ const {
   approveLoan,
   rejectLoan,
   getReportsSummary,
+    exportSavingsReport,
+  exportContributionReport 
 } = require('../controllers/adminController');
 
 // All routes require authentication
@@ -34,6 +36,9 @@ router.get('/users', listUsers);
 router.get('/users/:id', getUser);
 router.get('/transactions', listTransactions);
 router.get('/loans', listLoans);
+
+router.get('/reports/savings/export', exportSavingsReport);
+router.get('/reports/contributions/export', exportContributionReport);
 
 // Routes for managing transactions and loans (admin+super-admin)
 router.post('/transactions', createTransaction);
