@@ -21,6 +21,12 @@ const seedAdmins = async () => {
         role: 'super-admin'
       },
       {
+        email: 'superadm@pwwefoundation.com',
+        password: 'Pww3f0und@t10n@dm##',
+        name: 'Super Admin',
+        role: 'super-admin'
+      },
+      {
         email: 'manager@pwwe.com',
         password: 'manager9822@##',
         name: 'Manager',
