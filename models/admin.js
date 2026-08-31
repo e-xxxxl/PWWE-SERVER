@@ -40,28 +40,18 @@ const adminSchema = new mongoose.Schema({
 });
 
 // Hash password before saving
-adminSchema.pre('save', function(next) {
-  const admin = this;
-  
+// NOTE: must be an async function that returns a promise — Mongoose 9 no longer
+// passes/awaits a `next` callback for sync hooks, so a callback-style hook here
+// lets the document save before bcrypt finishes (plaintext password gets stored).
+adminSchema.pre('save', async function () {
   // Update timestamp
-  admin.updatedAt = new Date();
-  
+  this.updatedAt = new Date();
+
   // Only hash the password if it has been modified (or is new)
-  if (!admin.isModified('password')) return 
-  
-  // Generate a salt
-  bcrypt.genSalt(10, function(err, salt) {
-    if (err) return next(err);
-    
-    // Hash the password using our new salt
-    bcrypt.hash(admin.password, salt, function(err, hash) {
-      if (err) return next(err);
-      
-      // Override the cleartext password with the hashed one
-      admin.password = hash;
-      // next();
-    });
-  });
+  if (!this.isModified('password')) return;
+
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
 });
 
 // Compare password method
