@@ -1,6 +1,7 @@
 const Transaction = require('../models/transaction');
 const Loan = require('../models/loan');
 const Notification = require('../models/notification');
+const { uploadReceipt } = require('../utils/cloudinary');
 
 const paginationParams = (req) => {
   const page = Math.max(parseInt(req.query.page) || 1, 1);
@@ -83,9 +84,37 @@ const requestDeposit = async (req, res) => {
   try {
     const { amount, method, note } = req.body;
     const numericAmount = Number(amount);
+    const depositMethod = method || 'bank_transfer';
 
     if (!numericAmount || numericAmount <= 0) {
       return res.status(400).json({ success: false, message: 'Enter a valid deposit amount' });
+    }
+
+    // A bank transfer needs proof of payment before a treasurer can clear it.
+    if (depositMethod === 'bank_transfer' && !req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please upload your payment receipt to submit a bank transfer',
+      });
+    }
+
+    let receiptUrl;
+    let receiptPublicId;
+
+    if (req.file) {
+      try {
+        const uploaded = await uploadReceipt(req.file.buffer, {
+          publicId: `${req.user._id}-${Date.now()}`,
+        });
+        receiptUrl = uploaded.secure_url;
+        receiptPublicId = uploaded.public_id;
+      } catch (uploadError) {
+        console.error('Receipt upload error:', uploadError);
+        return res.status(502).json({
+          success: false,
+          message: 'Could not upload your receipt. Please try again.',
+        });
+      }
     }
 
     const transaction = await Transaction.create({
@@ -93,9 +122,11 @@ const requestDeposit = async (req, res) => {
       category: 'savings',
       type: 'deposit',
       amount: numericAmount,
-      method: method || 'bank_transfer',
+      method: depositMethod,
       note,
       status: 'pending',
+      receiptUrl,
+      receiptPublicId,
     });
 
     res.status(201).json({

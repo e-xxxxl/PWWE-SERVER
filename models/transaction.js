@@ -45,6 +45,10 @@ const transactionSchema = new mongoose.Schema(
       default: undefined,
     },
     // ---------------------------
+    // Proof of payment for manual (bank transfer / cash / other) deposits,
+    // uploaded to Cloudinary by the member and reviewed by an admin.
+    receiptUrl: { type: String },
+    receiptPublicId: { type: String },
     note: { type: String, trim: true, maxlength: 280 },
     recordedBy: {
       type: mongoose.Schema.Types.ObjectId,

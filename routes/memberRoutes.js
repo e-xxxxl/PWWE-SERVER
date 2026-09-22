@@ -3,6 +3,7 @@ const router = express.Router();
 const { body } = require('express-validator');
 const { protect, requireApproved } = require('../middleware/auth');
 const validate = require('../middleware/validate');
+const upload = require('../middleware/upload');
 const {
   getSavingsBalance,
   getSavingsHistory,
@@ -40,7 +41,8 @@ const loanValidation = [
 
 router.get('/savings/balance', getSavingsBalance);
 router.get('/savings/history', getSavingsHistory);
-router.post('/savings/deposit', depositValidation, validate, requestDeposit);
+// multer runs first so express-validator sees the parsed multipart fields
+router.post('/savings/deposit', upload.single('receipt'), depositValidation, validate, requestDeposit);
 
 router.get('/contributions', getContributionHistory);
 
