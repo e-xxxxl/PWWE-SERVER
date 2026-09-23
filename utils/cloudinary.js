@@ -10,14 +10,16 @@ cloudinary.config({
 // Everything payment-receipt related lives under this folder in the
 // Cloudinary media library.
 const RECEIPTS_FOLDER = 'pwwe/payment_receipts';
+// Optional proof-of-identity uploads for a loan guarantor.
+const GUARANTOR_IDS_FOLDER = 'pwwe/guarantor_ids';
 
 // Upload a file buffer (from multer's memory storage) straight to Cloudinary
-// via a stream, so we never write the receipt to disk.
-const uploadReceipt = (buffer, { publicId } = {}) => {
+// via a stream, so we never write it to disk.
+const uploadToFolder = (buffer, folder, { publicId } = {}) => {
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
       {
-        folder: RECEIPTS_FOLDER,
+        folder,
         resource_type: 'auto', // images and PDFs both land here correctly
         public_id: publicId,
         overwrite: false,
@@ -31,7 +33,17 @@ const uploadReceipt = (buffer, { publicId } = {}) => {
   });
 };
 
+const uploadReceipt = (buffer, opts) => uploadToFolder(buffer, RECEIPTS_FOLDER, opts);
+const uploadGuarantorId = (buffer, opts) => uploadToFolder(buffer, GUARANTOR_IDS_FOLDER, opts);
+
 const destroyReceipt = (publicId, resourceType = 'image') =>
   cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
 
-module.exports = { cloudinary, uploadReceipt, destroyReceipt, RECEIPTS_FOLDER };
+module.exports = {
+  cloudinary,
+  uploadReceipt,
+  uploadGuarantorId,
+  destroyReceipt,
+  RECEIPTS_FOLDER,
+  GUARANTOR_IDS_FOLDER,
+};

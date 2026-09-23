@@ -10,7 +10,8 @@ const {
   login,
   forgotPassword,
   resetPassword,
-  getMe
+  getMe,
+  updateProfile
 } = require('../controllers/authController');
 
 // Validation rulesss
@@ -53,5 +54,6 @@ router.post('/login', loginValidation, validate, login);
 router.post('/forgot-password', forgotPassword);
 router.post('/reset-password', resetPasswordValidation, validate, resetPassword);
 router.get('/me', protect, getMe);
+router.put('/me', protect, updateProfile);
 
 module.exports = router;

@@ -278,6 +278,7 @@ const listTransactions = async (req, res) => {
     if (req.query.category) filter.category = req.query.category;
     if (req.query.type) filter.type = req.query.type;
     if (req.query.user) filter.user = req.query.user;
+    if (req.query.paymentPurpose) filter.paymentPurpose = req.query.paymentPurpose;
 
     const [transactions, total] = await Promise.all([
       Transaction.find(filter)
@@ -304,7 +305,7 @@ const listTransactions = async (req, res) => {
 // @access  Private/Admin
 const createTransaction = async (req, res) => {
   try {
-    const { userId, category, type, amount, method, note, status } = req.body;
+    const { userId, category, type, amount, method, paymentPurpose, note, status } = req.body;
 
     const numericAmount = Number(amount);
     if (!userId || !numericAmount || numericAmount <= 0) {
@@ -322,6 +323,7 @@ const createTransaction = async (req, res) => {
       type: type || 'deposit',
       amount: numericAmount,
       method: method || 'cash',
+      paymentPurpose: ['shares', 'other', 'registration'].includes(paymentPurpose) ? paymentPurpose : undefined,
       note,
       status: status === 'cleared' ? 'cleared' : 'pending',
       recordedBy: req.admin._id, // Changed from req.user._id
@@ -405,6 +407,35 @@ const rejectTransaction = async (req, res) => {
   } catch (error) {
     console.error('Reject transaction error:', error);
     res.status(500).json({ success: false, message: 'Server error rejecting transaction' });
+  }
+};
+
+// @desc    Permanently delete a transaction record
+// @route   DELETE /api/admin/transactions/:id
+// @access  Private/Super-admin
+const deleteTransaction = async (req, res) => {
+  try {
+    const transaction = await Transaction.findById(req.params.id);
+    if (!transaction) {
+      return res.status(404).json({ success: false, message: 'Transaction not found' });
+    }
+
+    if (transaction.receiptPublicId) {
+      try {
+        const { destroyReceipt } = require('../utils/cloudinary');
+        await destroyReceipt(transaction.receiptPublicId, 'image');
+      } catch (cloudinaryError) {
+        // Don't block deletion of the record over a Cloudinary hiccup
+        console.error('Could not delete receipt from Cloudinary:', cloudinaryError.message);
+      }
+    }
+
+    await transaction.deleteOne();
+
+    res.status(200).json({ success: true, message: 'Transaction deleted' });
+  } catch (error) {
+    console.error('Delete transaction error:', error);
+    res.status(500).json({ success: false, message: 'Server error deleting transaction' });
   }
 };
 
@@ -520,7 +551,7 @@ const getReportsSummary = async (req, res) => {
       pendingMembers,
       activeMembers,
       savingsTotals,
-      contributionTotals,
+      purposeTotals,
       pendingTransactions,
       loanCounts,
       loanAmounts,
@@ -539,8 +570,8 @@ const getReportsSummary = async (req, res) => {
         },
       ]),
       Transaction.aggregate([
-        { $match: { category: 'contribution', status: 'cleared' } },
-        { $group: { _id: null, total: { $sum: '$amount' } } },
+        { $match: { category: 'savings', type: 'deposit', status: 'cleared' } },
+        { $group: { _id: '$paymentPurpose', total: { $sum: '$amount' } } },
       ]),
       Transaction.countDocuments({ status: 'pending' }),
       Loan.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
@@ -552,6 +583,7 @@ const getReportsSummary = async (req, res) => {
 
     const savings = savingsTotals[0] || { deposits: 0, withdrawals: 0 };
     const loanStatusCounts = loanCounts.reduce((acc, row) => ({ ...acc, [row._id]: row.count }), {});
+    const purposeCollected = purposeTotals.reduce((acc, row) => ({ ...acc, [row._id || 'shares']: row.total }), {});
 
     res.status(200).json({
       success: true,
@@ -566,8 +598,10 @@ const getReportsSummary = async (req, res) => {
           totalWithdrawals: savings.withdrawals,
           netBalance: savings.deposits - savings.withdrawals,
         },
-        contributions: {
-          totalCollected: contributionTotals[0]?.total || 0,
+        payments: {
+          shares: purposeCollected.shares || 0,
+          other: purposeCollected.other || 0,
+          registration: purposeCollected.registration || 0,
         },
         pendingTransactions,
         loans: {
@@ -653,66 +687,6 @@ const exportSavingsReport = async (req, res) => {
   }
 };
 
-// @desc    Export contribution report as Excel
-// @route   GET /api/admin/reports/contributions/export
-// @access  Private/Admin
-const exportContributionReport = async (req, res) => {
-  try {
-    const transactions = await Transaction.find({
-      category: 'contribution',
-      status: 'cleared'
-    })
-    .populate('user', 'name email coopId')
-    .sort({ createdAt: -1 });
-
-    // Format data for Excel
-    const reportData = transactions.map(tx => ({
-      Date: new Date(tx.createdAt).toLocaleDateString('en-NG'),
-      'Member Name': tx.user?.name || 'N/A',
-      'Coop ID': tx.user?.coopId || 'N/A',
-      'Email': tx.user?.email || 'N/A',
-      Amount: tx.amount,
-      Method: tx.method?.replace('_', ' '),
-      Status: tx.status,
-      Note: tx.note || '',
-      'Recorded By': tx.recordedBy || 'System'
-    }));
-
-    // Create workbook
-    const XLSX = require('xlsx');
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(reportData);
-
-    // Add summary
-    const totalCollected = transactions.reduce((sum, tx) => sum + tx.amount, 0);
-    const totalContributors = new Set(transactions.map(tx => tx.user?._id?.toString())).size;
-
-    const summaryData = [
-      { 'Summary': 'Total Collected', 'Amount': totalCollected },
-      { 'Summary': 'Total Contributors', 'Amount': totalContributors },
-      { 'Summary': 'Total Transactions', 'Amount': transactions.length }
-    ];
-
-    XLSX.utils.sheet_add_aoa(ws, [['']], { origin: -1 });
-    XLSX.utils.sheet_add_aoa(ws, [['SUMMARY']], { origin: -1 });
-    XLSX.utils.sheet_add_json(ws, summaryData, { origin: -1 });
-
-    XLSX.utils.book_append_sheet(wb, ws, 'Contributions Report');
-
-    // Generate buffer
-    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-
-    // Set headers
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename=contribution-report-${new Date().toISOString().split('T')[0]}.xlsx`);
-    
-    res.send(buffer);
-  } catch (error) {
-    console.error('Export contribution report error:', error);
-    res.status(500).json({ success: false, message: 'Server error exporting report' });
-  }
-};
-
 module.exports = {
   listUsers,
   getUser,
@@ -727,10 +701,10 @@ module.exports = {
   createTransaction,
   clearTransaction,
   rejectTransaction,
+  deleteTransaction,
   listLoans,
   approveLoan,
   rejectLoan,
   getReportsSummary,
-    exportSavingsReport,
-  exportContributionReport,
+  exportSavingsReport,
 };

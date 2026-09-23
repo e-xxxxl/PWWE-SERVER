@@ -18,6 +18,23 @@ const loanSchema = new mongoose.Schema(
       trim: true,
       maxlength: 500,
     },
+    guarantorName: {
+      type: String,
+      required: [true, "Guarantor's full name is required"],
+      trim: true,
+      maxlength: 100,
+    },
+    guarantorMembershipId: {
+      type: String,
+      required: [true, "Guarantor's membership ID is required"],
+      trim: true,
+      uppercase: true,
+      maxlength: 50,
+    },
+    // Optional photo/scan of the guarantor's membership ID, for the admin to
+    // cross-check against guarantorMembershipId above.
+    guarantorIdUrl: { type: String },
+    guarantorIdPublicId: { type: String },
     termMonths: {
       type: Number,
       enum: [3, 6, 12],

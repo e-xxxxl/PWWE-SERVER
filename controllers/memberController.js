@@ -1,7 +1,7 @@
 const Transaction = require('../models/transaction');
 const Loan = require('../models/loan');
 const Notification = require('../models/notification');
-const { uploadReceipt } = require('../utils/cloudinary');
+const { uploadReceipt, uploadGuarantorId } = require('../utils/cloudinary');
 
 const paginationParams = (req) => {
   const page = Math.max(parseInt(req.query.page) || 1, 1);
@@ -77,10 +77,12 @@ const getSavingsHistory = async (req, res) => {
   }
 };
 
-// @desc    Submit a savings deposit for admin clearance
-// @route   POST /api/member/savings/deposit
-// @access  Private (approved members)
-const requestDeposit = async (req, res) => {
+const VALID_PAYMENT_PURPOSES = ['shares', 'other', 'registration'];
+
+// Shared by requestDeposit (Shares / Other, requires approval) and
+// payRegistrationFee (Registration, no approval needed yet). Both create the
+// same kind of pending savings transaction with an optional receipt upload.
+const submitManualPayment = async (req, res, { paymentPurpose, successMessage }) => {
   try {
     const { amount, method, note } = req.body;
     const numericAmount = Number(amount);
@@ -88,6 +90,12 @@ const requestDeposit = async (req, res) => {
 
     if (!numericAmount || numericAmount <= 0) {
       return res.status(400).json({ success: false, message: 'Enter a valid deposit amount' });
+    }
+
+    // "Other payment" needs a description of what it's for — that's what
+    // distinguishes it from a plain Shares deposit.
+    if (paymentPurpose === 'other' && !note?.trim()) {
+      return res.status(400).json({ success: false, message: 'Tell us what this payment is for' });
     }
 
     // A bank transfer needs proof of payment before a treasurer can clear it.
@@ -123,53 +131,48 @@ const requestDeposit = async (req, res) => {
       type: 'deposit',
       amount: numericAmount,
       method: depositMethod,
+      paymentPurpose,
       note,
       status: 'pending',
       receiptUrl,
       receiptPublicId,
     });
 
-    res.status(201).json({
-      success: true,
-      message: 'Deposit submitted and awaiting confirmation',
-      transaction,
-    });
+    res.status(201).json({ success: true, message: successMessage, transaction });
   } catch (error) {
-    console.error('Request deposit error:', error);
-    res.status(500).json({ success: false, message: 'Server error submitting deposit' });
+    console.error('Submit manual payment error:', error);
+    res.status(500).json({ success: false, message: 'Server error submitting payment' });
   }
 };
 
-// @desc    List the member's monthly contribution history
-// @route   GET /api/member/contributions
+// @desc    Submit a savings deposit (Shares or Other payment) for admin clearance
+// @route   POST /api/member/savings/deposit
 // @access  Private (approved members)
-const getContributionHistory = async (req, res) => {
-  try {
-    const { page, limit, skip } = paginationParams(req);
-    const filter = { user: req.user._id, category: 'contribution' };
-
-    const [items, total] = await Promise.all([
-      Transaction.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
-      Transaction.countDocuments(filter),
-    ]);
-
-    res.status(200).json({
-      success: true,
-      contributions: items,
-      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
-    });
-  } catch (error) {
-    console.error('Get contribution history error:', error);
-    res.status(500).json({ success: false, message: 'Server error fetching contribution history' });
-  }
+const requestDeposit = (req, res) => {
+  const paymentPurpose = VALID_PAYMENT_PURPOSES.includes(req.body.paymentPurpose)
+    ? req.body.paymentPurpose
+    : 'shares';
+  return submitManualPayment(req, res, {
+    paymentPurpose,
+    successMessage: 'Deposit submitted and awaiting confirmation',
+  });
 };
+
+// @desc    Pay the one-time membership registration fee
+// @route   POST /api/member/registration-fee
+// @access  Private (any logged-in member — approval not required)
+const payRegistrationFee = (req, res) =>
+  submitManualPayment(req, res, {
+    paymentPurpose: 'registration',
+    successMessage: 'Registration fee submitted and awaiting confirmation',
+  });
 
 // @desc    Apply for a loan
 // @route   POST /api/member/loans
 // @access  Private (approved members)
 const applyForLoan = async (req, res) => {
   try {
-    const { amount, purpose, termMonths } = req.body;
+    const { amount, purpose, termMonths, guarantorName, guarantorMembershipId } = req.body;
     const numericAmount = Number(amount);
 
     if (!numericAmount || numericAmount <= 0) {
@@ -178,23 +181,51 @@ const applyForLoan = async (req, res) => {
     if (!purpose || !purpose.trim()) {
       return res.status(400).json({ success: false, message: 'Tell us what the loan is for' });
     }
+    if (!guarantorName || !guarantorName.trim()) {
+      return res.status(400).json({ success: false, message: "Enter your guarantor's full name" });
+    }
+    if (!guarantorMembershipId || !guarantorMembershipId.trim()) {
+      return res.status(400).json({ success: false, message: "Enter your guarantor's membership ID" });
+    }
 
     const existingPending = await Loan.findOne({ user: req.user._id, status: 'pending' });
     if (existingPending) {
       return res.status(409).json({ success: false, message: 'You already have a loan application pending review' });
     }
 
-    // Eligibility: at least 3 cleared monthly contributions
-    const clearedContributions = await Transaction.countDocuments({
+    // Eligibility: at least 3 cleared monthly savings deposits
+    const clearedSavings = await Transaction.countDocuments({
       user: req.user._id,
-      category: 'contribution',
+      category: 'savings',
+      type: 'deposit',
       status: 'cleared',
     });
-    if (clearedContributions < 3) {
+    if (clearedSavings < 3) {
       return res.status(403).json({
         success: false,
-        message: 'You need at least 3 cleared monthly contributions before applying for a loan',
+        message: 'You need at least 3 cleared monthly savings before applying for a loan',
       });
+    }
+
+    // Proof of the guarantor's membership ID is optional, but if the member
+    // attached one, upload it so the admin can review it alongside the typed ID.
+    let guarantorIdUrl;
+    let guarantorIdPublicId;
+
+    if (req.file) {
+      try {
+        const uploaded = await uploadGuarantorId(req.file.buffer, {
+          publicId: `${req.user._id}-guarantor-${Date.now()}`,
+        });
+        guarantorIdUrl = uploaded.secure_url;
+        guarantorIdPublicId = uploaded.public_id;
+      } catch (uploadError) {
+        console.error('Guarantor ID upload error:', uploadError);
+        return res.status(502).json({
+          success: false,
+          message: 'Could not upload the guarantor ID. Please try again.',
+        });
+      }
     }
 
     const loan = await Loan.create({
@@ -202,6 +233,10 @@ const applyForLoan = async (req, res) => {
       amount: numericAmount,
       purpose: purpose.trim(),
       termMonths: Number(termMonths) || 3,
+      guarantorName: guarantorName.trim(),
+      guarantorMembershipId: guarantorMembershipId.trim(),
+      guarantorIdUrl,
+      guarantorIdPublicId,
     });
 
     res.status(201).json({ success: true, message: 'Loan application submitted', loan });
@@ -287,7 +322,7 @@ module.exports = {
   getSavingsBalance,
   getSavingsHistory,
   requestDeposit,
-  getContributionHistory,
+  payRegistrationFee,
   applyForLoan,
   getMyLoans,
   getNotifications,

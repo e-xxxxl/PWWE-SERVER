@@ -15,12 +15,12 @@ const {
   createTransaction,
   clearTransaction,
   rejectTransaction,
+  deleteTransaction,
   listLoans,
   approveLoan,
   rejectLoan,
   getReportsSummary,
-    exportSavingsReport,
-  exportContributionReport 
+  exportSavingsReport,
 } = require('../controllers/adminController');
 
 // All routes require authentication
@@ -38,7 +38,6 @@ router.get('/transactions', listTransactions);
 router.get('/loans', listLoans);
 
 router.get('/reports/savings/export', exportSavingsReport);
-router.get('/reports/contributions/export', exportContributionReport);
 
 // Routes for managing transactions and loans (admin+super-admin)
 router.post('/transactions', createTransaction);
@@ -51,5 +50,6 @@ router.put('/loans/:id/reject', rejectLoan);
 router.put('/users/:id/status', authorize('super-admin'), setUserStatus);
 router.put('/users/:id/role', authorize('super-admin'), updateUserRole);
 router.delete('/users/:id', authorize('super-admin'), deleteUser);
+router.delete('/transactions/:id', authorize('super-admin'), deleteTransaction);
 
-module.exports = router;    
+module.exports = router;

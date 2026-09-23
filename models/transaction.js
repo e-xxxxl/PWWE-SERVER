@@ -9,9 +9,18 @@ const transactionSchema = new mongoose.Schema(
     },
     category: {
       type: String,
+      // 'contribution' is retained only so older records still validate on
+      // save; the member-facing Contributions flow has been removed — new
+      // deposits are classified instead via paymentPurpose below.
       enum: ['savings', 'contribution'],
       required: true,
       default: 'savings',
+    },
+    // What a savings-category deposit is actually for. Replaces the old,
+    // separate "contribution" category with member-selectable purposes.
+    paymentPurpose: {
+      type: String,
+      enum: ['shares', 'other', 'registration'],
     },
     type: {
       type: String,

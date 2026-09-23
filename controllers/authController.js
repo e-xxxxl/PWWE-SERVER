@@ -389,7 +389,7 @@ const resetPassword = async (req, res) => {
 const getMe = async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
-    
+
     res.status(200).json({
       success: true,
       user: user.toJSON()
@@ -404,6 +404,54 @@ const getMe = async (req, res) => {
   }
 };
 
+// @desc    Update the logged-in member's own profile
+// @route   PUT /api/auth/me
+// @access  Private
+// Note: email is intentionally not editable here — changing it would need
+// re-verification, which isn't wired up yet.
+const updateProfile = async (req, res) => {
+  try {
+    const { name, phone, address, lineOfBusiness, nextOfKin } = req.body;
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    if (name !== undefined) user.name = name;
+    if (phone !== undefined) user.phone = phone;
+    if (address !== undefined) user.address = address;
+    if (lineOfBusiness !== undefined) user.lineOfBusiness = lineOfBusiness;
+    if (nextOfKin !== undefined) {
+      user.nextOfKin = {
+        name: nextOfKin.name,
+        address: nextOfKin.address,
+        phone: nextOfKin.phone,
+      };
+    }
+
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Profile updated',
+      user: user.toJSON(),
+    });
+  } catch (error) {
+    console.error('Update profile error:', error);
+
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map((e) => e.message);
+      return res.status(400).json({ success: false, message: messages[0] });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Server error updating profile',
+    });
+  }
+};
+
 module.exports = {
   register,
   verifyEmail,
@@ -411,5 +459,6 @@ module.exports = {
   login,
   forgotPassword,
   resetPassword,
-  getMe
+  getMe,
+  updateProfile,
 };

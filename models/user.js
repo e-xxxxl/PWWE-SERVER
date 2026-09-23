@@ -24,6 +24,21 @@ const userSchema = new mongoose.Schema(
       required: [true, 'Phone number is required'],
       trim: true,
     },
+    address: {
+      type: String,
+      trim: true,
+      maxlength: [300, 'Address cannot exceed 300 characters'],
+    },
+    lineOfBusiness: {
+      type: String,
+      trim: true,
+      maxlength: [150, 'Line of business cannot exceed 150 characters'],
+    },
+    nextOfKin: {
+      name: { type: String, trim: true, maxlength: 100 },
+      address: { type: String, trim: true, maxlength: 300 },
+      phone: { type: String, trim: true, maxlength: 30 },
+    },
     password: {
       type: String,
       required: [true, 'Password is required'],

@@ -105,7 +105,72 @@ const checkAdmin = async (req, res) => {
   }
 };
 
+// @desc    List admin/moderator accounts
+// @route   GET /api/admin/auth/admins
+// @access  Private/Super-admin
+const listAdmins = async (req, res) => {
+  try {
+    const admins = await Admin.find({}).sort({ createdAt: -1 });
+    res.json({ success: true, admins: admins.map((a) => a.toJSON()) });
+  } catch (error) {
+    console.error('List admins error:', error);
+    res.status(500).json({ success: false, message: 'Server error fetching admin accounts' });
+  }
+};
+
+// @desc    Create a new admin or moderator account
+// @route   POST /api/admin/auth/admins
+// @access  Private/Super-admin
+const createAdmin = async (req, res) => {
+  try {
+    const { name, email, password, role } = req.body;
+
+    if (!name || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name, email and password are required',
+      });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password must be at least 6 characters',
+      });
+    }
+    // Super-admin accounts are created out-of-band (seed script), not
+    // through this endpoint, to avoid casual privilege escalation.
+    const assignedRole = ['moderator', 'admin'].includes(role) ? role : 'admin';
+
+    const existing = await Admin.findOne({ email: email.toLowerCase() });
+    if (existing) {
+      return res.status(409).json({
+        success: false,
+        message: 'An admin account with this email already exists',
+      });
+    }
+
+    const admin = await Admin.create({
+      name,
+      email: email.toLowerCase(),
+      password,
+      role: assignedRole,
+      createdBy: req.admin._id,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: `${assignedRole === 'moderator' ? 'Moderator' : 'Admin'} account created`,
+      admin: admin.toJSON(),
+    });
+  } catch (error) {
+    console.error('Create admin error:', error);
+    res.status(500).json({ success: false, message: 'Server error creating admin account' });
+  }
+};
+
 module.exports = {
   adminLogin,
-  checkAdmin
+  checkAdmin,
+  listAdmins,
+  createAdmin,
 };
