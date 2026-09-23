@@ -31,10 +31,6 @@ const loanSchema = new mongoose.Schema(
       uppercase: true,
       maxlength: 50,
     },
-    // Optional photo/scan of the guarantor's membership ID, for the admin to
-    // cross-check against guarantorMembershipId above.
-    guarantorIdUrl: { type: String },
-    guarantorIdPublicId: { type: String },
     termMonths: {
       type: Number,
       enum: [3, 6, 12],

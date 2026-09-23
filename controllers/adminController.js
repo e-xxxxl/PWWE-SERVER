@@ -323,7 +323,7 @@ const createTransaction = async (req, res) => {
       type: type || 'deposit',
       amount: numericAmount,
       method: method || 'cash',
-      paymentPurpose: ['shares', 'other', 'registration'].includes(paymentPurpose) ? paymentPurpose : undefined,
+      paymentPurpose: ['shares', 'loan_repayment', 'savings', 'other', 'registration'].includes(paymentPurpose) ? paymentPurpose : undefined,
       note,
       status: status === 'cleared' ? 'cleared' : 'pending',
       recordedBy: req.admin._id, // Changed from req.user._id
@@ -600,6 +600,8 @@ const getReportsSummary = async (req, res) => {
         },
         payments: {
           shares: purposeCollected.shares || 0,
+          loanRepayment: purposeCollected.loan_repayment || 0,
+          savings: purposeCollected.savings || 0,
           other: purposeCollected.other || 0,
           registration: purposeCollected.registration || 0,
         },

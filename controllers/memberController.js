@@ -1,7 +1,7 @@
 const Transaction = require('../models/transaction');
 const Loan = require('../models/loan');
 const Notification = require('../models/notification');
-const { uploadReceipt, uploadGuarantorId } = require('../utils/cloudinary');
+const { uploadReceipt } = require('../utils/cloudinary');
 
 const paginationParams = (req) => {
   const page = Math.max(parseInt(req.query.page) || 1, 1);
@@ -77,7 +77,7 @@ const getSavingsHistory = async (req, res) => {
   }
 };
 
-const VALID_PAYMENT_PURPOSES = ['shares', 'other', 'registration'];
+const VALID_PAYMENT_PURPOSES = ['shares', 'loan_repayment', 'savings', 'other', 'registration'];
 
 // Shared by requestDeposit (Shares / Other, requires approval) and
 // payRegistrationFee (Registration, no approval needed yet). Both create the
@@ -207,27 +207,6 @@ const applyForLoan = async (req, res) => {
       });
     }
 
-    // Proof of the guarantor's membership ID is optional, but if the member
-    // attached one, upload it so the admin can review it alongside the typed ID.
-    let guarantorIdUrl;
-    let guarantorIdPublicId;
-
-    if (req.file) {
-      try {
-        const uploaded = await uploadGuarantorId(req.file.buffer, {
-          publicId: `${req.user._id}-guarantor-${Date.now()}`,
-        });
-        guarantorIdUrl = uploaded.secure_url;
-        guarantorIdPublicId = uploaded.public_id;
-      } catch (uploadError) {
-        console.error('Guarantor ID upload error:', uploadError);
-        return res.status(502).json({
-          success: false,
-          message: 'Could not upload the guarantor ID. Please try again.',
-        });
-      }
-    }
-
     const loan = await Loan.create({
       user: req.user._id,
       amount: numericAmount,
@@ -235,8 +214,6 @@ const applyForLoan = async (req, res) => {
       termMonths: Number(termMonths) || 3,
       guarantorName: guarantorName.trim(),
       guarantorMembershipId: guarantorMembershipId.trim(),
-      guarantorIdUrl,
-      guarantorIdPublicId,
     });
 
     res.status(201).json({ success: true, message: 'Loan application submitted', loan });

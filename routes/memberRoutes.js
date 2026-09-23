@@ -28,7 +28,7 @@ router.put('/notifications/:id/read', markNotificationRead);
 const depositValidation = [
   body('amount').isFloat({ gt: 0 }).withMessage('Enter a valid deposit amount'),
   body('method').optional().isIn(['bank_transfer', 'cash', 'card', 'other']).withMessage('Invalid payment method'),
-  body('paymentPurpose').optional().isIn(['shares', 'other', 'registration']).withMessage('Invalid payment purpose'),
+  body('paymentPurpose').optional().isIn(['shares', 'loan_repayment', 'savings', 'other', 'registration']).withMessage('Invalid payment purpose'),
 ];
 
 // The one-time registration fee is payable before admin approval — a brand
@@ -52,7 +52,6 @@ router.get('/savings/history', getSavingsHistory);
 router.post('/savings/deposit', upload.single('receipt'), depositValidation, validate, requestDeposit);
 
 router.get('/loans', getMyLoans);
-// multer runs first so express-validator sees the parsed multipart fields
-router.post('/loans', upload.single('guarantorId'), loanValidation, validate, applyForLoan);
+router.post('/loans', loanValidation, validate, applyForLoan);
 
 module.exports = router;

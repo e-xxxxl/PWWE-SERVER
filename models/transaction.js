@@ -20,7 +20,7 @@ const transactionSchema = new mongoose.Schema(
     // separate "contribution" category with member-selectable purposes.
     paymentPurpose: {
       type: String,
-      enum: ['shares', 'other', 'registration'],
+      enum: ['shares', 'loan_repayment', 'savings', 'other', 'registration'],
     },
     type: {
       type: String,
