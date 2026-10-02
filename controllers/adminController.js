@@ -312,13 +312,18 @@ const createTransaction = async (req, res) => {
       return res.status(400).json({ success: false, message: 'A member and a valid amount are required' });
     }
 
-    const member = await User.findById(userId);
+    // The admin form accepts either a Coop ID (e.g. PWWEF20261029369) or a raw
+    // user _id, so only try findById when the value actually looks like an ObjectId.
+    const identifier = String(userId).trim();
+    const member = /^[a-f0-9]{24}$/i.test(identifier)
+      ? await User.findById(identifier)
+      : await User.findOne({ coopId: identifier.toUpperCase() });
     if (!member) {
-      return res.status(404).json({ success: false, message: 'Member not found' });
+      return res.status(404).json({ success: false, message: 'No member found with that Coop ID' });
     }
 
     const transaction = await Transaction.create({
-      user: userId,
+      user: member._id,
       category: category || 'savings',
       type: type || 'deposit',
       amount: numericAmount,
@@ -332,7 +337,7 @@ const createTransaction = async (req, res) => {
     });
 
     if (transaction.status === 'cleared') {
-      await notify(userId, {
+      await notify(member._id, {
         title: transaction.category === 'savings' ? 'Deposit recorded' : 'Contribution recorded',
         message: `₦${numericAmount.toLocaleString()} was recorded to your ${transaction.category} account.`,
         type: 'success',
