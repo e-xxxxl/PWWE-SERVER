@@ -2,13 +2,16 @@ const axios = require('axios');
 
 const PAYSTACK_BASE_URL = 'https://api.paystack.co';
 
-// Create axios instance for Paystack
+// Create axios instance for Paystack. The secret key is read per request (not
+// at import time) so it always reflects the deployed environment.
 const paystackApi = axios.create({
   baseURL: PAYSTACK_BASE_URL,
-  headers: {
-    Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-    'Content-Type': 'application/json'
-  }
+  timeout: 20000,
+  headers: { 'Content-Type': 'application/json' }
+});
+paystackApi.interceptors.request.use((config) => {
+  config.headers.Authorization = `Bearer ${process.env.PAYSTACK_SECRET_KEY}`;
+  return config;
 });
 
 /**

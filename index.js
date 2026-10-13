@@ -37,7 +37,16 @@ app.use(
 );
 
 // Body parsing
-app.use(express.json({ limit: '10kb' }));
+// Keep the raw bytes too — Paystack signs the exact webhook body, so the
+// signature can only be verified against it (not a re-serialised req.body).
+app.use(
+  express.json({
+    limit: '10kb',
+    verify: (req, res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 
 // Manual NoSQL injection prevention (replaces express-mongo-sanitize)

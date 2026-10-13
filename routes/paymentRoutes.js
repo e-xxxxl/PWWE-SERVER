@@ -2,11 +2,15 @@ const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
 const {
+  getPaymentConfig,
   initializeDeposit,
   verifyDeposit,
   getPaymentHistory,
   getUserTransactions
 } = require('../controllers/paymentController');
+
+// Whether online payment is configured on this server
+router.get('/config', protect, getPaymentConfig);
 
 // Initialize a deposit payment
 router.post('/initialize-deposit', protect, initializeDeposit);

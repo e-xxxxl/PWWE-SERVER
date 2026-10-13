@@ -4,33 +4,68 @@ const User = require('../models/user');
 const { initializeTransaction, verifyTransaction } = require('../utils/paystack');
 const notify = require('../utils/notify');
 
+const VALID_PURPOSES = ['shares', 'loan_repayment', 'savings', 'other', 'registration'];
+const PURPOSE_LABELS = {
+  shares: 'shares payment',
+  loan_repayment: 'loan repayment',
+  savings: 'savings deposit',
+  other: 'payment',
+  registration: 'registration fee',
+};
+
 // Generate unique reference
 const generateReference = () => {
   const timestamp = Date.now();
-  const random = Math.random().toString(36).substring(2, 10);
+  const random = crypto.randomBytes(5).toString('hex');
   return `PWWE-${timestamp}-${random}`;
 };
 
 /**
- * Initialize a deposit payment
+ * Lets the frontend know whether online payment is configured, so the option
+ * only appears when the server actually has a Paystack secret key.
+ */
+const getPaymentConfig = (req, res) => {
+  const key = process.env.PAYSTACK_SECRET_KEY || '';
+  res.json({
+    success: true,
+    paystackEnabled: /^sk_(live|test)_/.test(key),
+  });
+};
+
+/**
+ * Initialize an online (Paystack) payment.
+ * Accepts the same purposes as a manual deposit. Registration fees are allowed
+ * before admin approval; everything else needs an approved membership — the
+ * same rule the manual deposit routes enforce.
  */
 const initializeDeposit = async (req, res) => {
   try {
     const { amount, note } = req.body;
+    const paymentPurpose = VALID_PURPOSES.includes(req.body.paymentPurpose)
+      ? req.body.paymentPurpose
+      : 'shares';
     const user = await User.findById(req.user._id);
 
     if (!user) {
-      return res.status(404).json({
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    if (paymentPurpose !== 'registration' && user.approvalStatus !== 'approved') {
+      return res.status(403).json({
         success: false,
-        message: 'User not found'
+        message:
+          user.approvalStatus === 'rejected'
+            ? 'Your membership application was not approved. Contact support for details.'
+            : 'Your membership is still pending admin approval',
       });
     }
 
-    if (!amount || amount < 100) {
-      return res.status(400).json({
-        success: false,
-        message: 'Minimum deposit amount is ₦100'
-      });
+    const numericAmount = Number(amount);
+    if (!numericAmount || numericAmount < 100) {
+      return res.status(400).json({ success: false, message: 'Minimum payment amount is ₦100' });
+    }
+    if (paymentPurpose === 'other' && !note?.trim()) {
+      return res.status(400).json({ success: false, message: 'Tell us what this payment is for' });
     }
 
     const reference = generateReference();
@@ -40,37 +75,37 @@ const initializeDeposit = async (req, res) => {
       user: user._id,
       category: 'savings',
       type: 'deposit',
-      amount: Number(amount),
+      amount: numericAmount,
       method: 'paystack',
+      paymentPurpose,
       status: 'pending',
       reference,
-      note: note || 'Deposit via Paystack',
-      paymentData: {
-        gateway: 'paystack'
-      }
+      note: note?.trim() || undefined,
+      paymentData: { gateway: 'paystack' },
     });
 
     // Initialize Paystack payment
     const payment = await initializeTransaction({
       email: user.email,
-      amount: Number(amount),
+      amount: numericAmount,
       reference,
       metadata: {
         userId: user._id.toString(),
         transactionId: transaction._id.toString(),
         type: 'deposit',
-        userName: user.name
-      }
+        paymentPurpose,
+        userName: user.name,
+      },
     });
 
     if (!payment.success) {
       transaction.status = 'failed';
-      transaction.note = `Payment initialization failed: ${payment.message}`;
+      transaction.note = `Payment initialization failed: ${payment.message}`.slice(0, 280);
       await transaction.save();
-      
+
       return res.status(400).json({
         success: false,
-        message: payment.message || 'Payment initialization failed'
+        message: payment.message || 'Payment initialization failed',
       });
     }
 
@@ -81,222 +116,184 @@ const initializeDeposit = async (req, res) => {
         authorization_url: payment.data.authorization_url,
         access_code: payment.data.access_code,
         reference: payment.data.reference,
-        transaction
-      }
+        transaction,
+      },
     });
   } catch (error) {
     console.error('Initialize deposit error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error initializing payment'
-    });
+    res.status(500).json({ success: false, message: 'Server error initializing payment' });
   }
 };
 
 /**
- * Verify a deposit payment
+ * Settle a Paystack result onto a transaction. Shared by the verify endpoint
+ * and the webhook so both behave identically and a payment is only ever
+ * credited once (the pending -> cleared flip is atomic).
+ * Returns the up-to-date transaction.
+ */
+const settlePayment = async (transaction, paymentData) => {
+  if (transaction.status !== 'pending') return transaction;
+
+  if (paymentData.status === 'success') {
+    const expectedKobo = Math.round(transaction.amount * 100);
+    if (paymentData.amount !== expectedKobo || (paymentData.currency && paymentData.currency !== 'NGN')) {
+      console.error(
+        `Paystack amount/currency mismatch for ${transaction.reference}: expected ${expectedKobo} NGN kobo, got ${paymentData.amount} ${paymentData.currency}`
+      );
+      return transaction; // leave pending for an admin to review — never credit a mismatched amount
+    }
+
+    const cleared = await Transaction.findOneAndUpdate(
+      { _id: transaction._id, status: 'pending' },
+      {
+        status: 'cleared',
+        reviewedAt: new Date(),
+        paymentData: {
+          gateway: 'paystack',
+          gatewayReference: paymentData.reference,
+          amount: paymentData.amount / 100,
+          channel: paymentData.channel,
+          currency: paymentData.currency,
+          paidAt: paymentData.paid_at,
+          customerEmail: paymentData.customer?.email,
+          authorization: paymentData.authorization
+            ? {
+                cardType: paymentData.authorization.card_type,
+                last4: paymentData.authorization.last4,
+                bank: paymentData.authorization.bank,
+                brand: paymentData.authorization.brand,
+              }
+            : null,
+        },
+      },
+      { returnDocument: 'after' }
+    );
+
+    if (cleared) {
+      const label = PURPOSE_LABELS[cleared.paymentPurpose] || 'payment';
+      await notify(cleared.user, {
+        title: 'Payment successful',
+        message: `Your ${label} of ₦${cleared.amount.toLocaleString()} has been confirmed.`,
+        type: 'success',
+      });
+      return cleared;
+    }
+    return (await Transaction.findById(transaction._id)) || transaction;
+  }
+
+  // Only a definite failure ends the transaction. 'abandoned' / 'ongoing' /
+  // 'pending' mean the member may still complete payment, so stay pending.
+  if (paymentData.status === 'failed' || paymentData.status === 'reversed') {
+    const failed = await Transaction.findOneAndUpdate(
+      { _id: transaction._id, status: 'pending' },
+      {
+        status: 'failed',
+        note: `Payment failed: ${paymentData.gateway_response || 'Unknown error'}`.slice(0, 280),
+      },
+      { returnDocument: 'after' }
+    );
+    return failed || transaction;
+  }
+
+  return transaction;
+};
+
+/**
+ * Verify an online payment (called by the frontend after checkout)
  */
 const verifyDeposit = async (req, res) => {
   try {
     const { reference } = req.params;
 
-    // Find the transaction
-    const transaction = await Transaction.findOne({ reference });
+    // Members can only verify their own payments
+    const transaction = await Transaction.findOne({ reference, user: req.user._id });
     if (!transaction) {
-      return res.status(404).json({
-        success: false,
-        message: 'Transaction not found'
-      });
+      return res.status(404).json({ success: false, message: 'Transaction not found' });
     }
 
-    // If already cleared, return success
     if (transaction.status === 'cleared') {
-      return res.json({
-        success: true,
-        message: 'Payment already verified',
-        transaction
+      return res.json({ success: true, message: 'Payment already verified', transaction });
+    }
+    if (transaction.status === 'failed' || transaction.status === 'rejected') {
+      return res.status(400).json({
+        success: false,
+        message: transaction.note || 'Payment was not successful',
+        transaction,
       });
     }
 
-    // Verify with Paystack
     const verification = await verifyTransaction(reference);
-    
     if (!verification.success) {
       return res.status(400).json({
         success: false,
-        message: verification.message || 'Payment verification failed'
+        message: verification.message || 'Payment verification failed',
+        transaction,
       });
     }
 
-    const paymentData = verification.data;
+    const settled = await settlePayment(transaction, verification.data);
 
-    // Check if payment was successful
-    if (paymentData.status === 'success') {
-      // Update transaction
-      transaction.status = 'cleared';
-      transaction.paymentData = {
-        gateway: 'paystack',
-        gatewayReference: paymentData.reference,
-        amount: paymentData.amount / 100,
-        channel: paymentData.channel,
-        currency: paymentData.currency,
-        paidAt: paymentData.paid_at,
-        customerEmail: paymentData.customer?.email,
-        customerCode: paymentData.customer?.customer_code,
-        authorization: paymentData.authorization ? {
-          authorizationCode: paymentData.authorization.authorization_code,
-          cardType: paymentData.authorization.card_type,
-          last4: paymentData.authorization.last4,
-          expMonth: paymentData.authorization.exp_month,
-          expYear: paymentData.authorization.exp_year,
-          bank: paymentData.authorization.bank,
-          brand: paymentData.authorization.brand,
-          reusable: paymentData.authorization.reusable
-        } : null
-      };
-      await transaction.save();
-
-      // Notify user
-      await notify(transaction.user, {
-        title: 'Deposit Successful',
-        message: `Your deposit of ₦${transaction.amount.toLocaleString()} has been confirmed.`,
-        type: 'success'
-      });
-
-      res.json({
+    if (settled.status === 'cleared') {
+      return res.json({
         success: true,
         message: 'Payment verified successfully',
-        transaction,
-        paymentDetails: transaction.paymentData
-      });
-    } else {
-      // Payment failed
-      transaction.status = 'failed';
-      transaction.note = `Payment failed: ${paymentData.gateway_response || 'Unknown error'}`;
-      await transaction.save();
-
-      res.status(400).json({
-        success: false,
-        message: paymentData.gateway_response || 'Payment was not successful',
-        transaction
+        transaction: settled,
       });
     }
+    if (settled.status === 'failed') {
+      return res.status(400).json({
+        success: false,
+        message: verification.data.gateway_response || 'Payment was not successful',
+        transaction: settled,
+      });
+    }
+
+    // Still pending — the frontend keeps polling for a short while
+    return res.json({
+      success: true,
+      message: 'Payment is still being processed',
+      transaction: settled,
+    });
   } catch (error) {
     console.error('Verify deposit error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error verifying payment'
-    });
+    res.status(500).json({ success: false, message: 'Server error verifying payment' });
   }
 };
 
 /**
- * Handle Paystack webhook
+ * Handle Paystack webhook (source of truth if the member closes the tab early)
  */
 const handleWebhook = async (req, res) => {
   try {
-    // Verify webhook signature
-    const hash = crypto
-      .createHmac('sha512', process.env.PAYSTACK_SECRET_KEY)
-      .update(JSON.stringify(req.body))
-      .digest('hex');
+    const secret = process.env.PAYSTACK_SECRET_KEY;
+    const signature = req.headers['x-paystack-signature'];
+    if (!secret || !signature || !req.rawBody) {
+      return res.status(401).json({ message: 'Invalid signature' });
+    }
 
-    if (hash !== req.headers['x-paystack-signature']) {
+    // Paystack signs the exact bytes it sent, so hash the raw body
+    const expected = crypto.createHmac('sha512', secret).update(req.rawBody).digest('hex');
+    const a = Buffer.from(expected);
+    const b = Buffer.from(String(signature));
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
       return res.status(401).json({ message: 'Invalid signature' });
     }
 
     const event = req.body;
 
-    // Handle different event types
-    switch (event.event) {
-      case 'charge.success':
-        await handleSuccessfulCharge(event.data);
-        break;
-      
-      case 'charge.failed':
-        await handleFailedCharge(event.data);
-        break;
-      
-      case 'transfer.success':
-        console.log('Transfer successful:', event.data);
-        break;
-      
-      case 'transfer.failed':
-        console.log('Transfer failed:', event.data);
-        break;
-      
-      default:
-        console.log('Unhandled event:', event.event);
+    if (event.event === 'charge.success' || event.event === 'charge.failed') {
+      const reference = event.data?.reference;
+      const transaction = reference && (await Transaction.findOne({ reference }));
+      if (transaction) {
+        await settlePayment(transaction, event.data);
+      }
     }
 
+    // Always acknowledge a correctly signed event so Paystack stops retrying
     res.sendStatus(200);
   } catch (error) {
     console.error('Webhook error:', error);
     res.sendStatus(500);
-  }
-};
-
-/**
- * Handle successful charge
- */
-const handleSuccessfulCharge = async (paymentData) => {
-  try {
-    const reference = paymentData.reference;
-    const transaction = await Transaction.findOne({ reference });
-    
-    if (transaction && transaction.status === 'pending') {
-      transaction.status = 'cleared';
-      transaction.paymentData = {
-        gateway: 'paystack',
-        gatewayReference: paymentData.reference,
-        amount: paymentData.amount / 100,
-        channel: paymentData.channel,
-        currency: paymentData.currency,
-        paidAt: paymentData.paid_at,
-        customerEmail: paymentData.customer?.email,
-        customerCode: paymentData.customer?.customer_code,
-        authorization: paymentData.authorization ? {
-          authorizationCode: paymentData.authorization.authorization_code,
-          cardType: paymentData.authorization.card_type,
-          last4: paymentData.authorization.last4,
-          expMonth: paymentData.authorization.exp_month,
-          expYear: paymentData.authorization.exp_year,
-          bank: paymentData.authorization.bank,
-          brand: paymentData.authorization.brand,
-          reusable: paymentData.authorization.reusable
-        } : null
-      };
-      await transaction.save();
-
-      // Notify user
-      await notify(transaction.user, {
-        title: 'Deposit Successful',
-        message: `Your deposit of ₦${transaction.amount.toLocaleString()} has been confirmed.`,
-        type: 'success'
-      });
-
-      console.log(`Payment verified via webhook: ${reference}`);
-    }
-  } catch (error) {
-    console.error('Handle successful charge error:', error);
-  }
-};
-
-/**
- * Handle failed charge
- */
-const handleFailedCharge = async (paymentData) => {
-  try {
-    const reference = paymentData.reference;
-    const transaction = await Transaction.findOne({ reference });
-    
-    if (transaction && transaction.status === 'pending') {
-      transaction.status = 'failed';
-      transaction.note = `Payment failed: ${paymentData.gateway_response || 'Unknown error'}`;
-      await transaction.save();
-    }
-  } catch (error) {
-    console.error('Handle failed charge error:', error);
   }
 };
 
@@ -367,6 +364,7 @@ const getUserTransactions = async (req, res) => {
 };
 
 module.exports = {
+  getPaymentConfig,
   initializeDeposit,
   verifyDeposit,
   handleWebhook,
